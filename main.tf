@@ -58,7 +58,7 @@ module "claude-code" {
   source              = "registry.coder.com/coder/claude-code/coder"
   version             = "2.0.0"
   agent_id            = coder_agent.dev.id
-  folder              = "/home/coder/projects"
+  folder              = data.coder_parameter.repo_url.value != "" ? "/home/coder/projects/${trimsuffix(basename(data.coder_parameter.repo_url.value), ".git")}" : "/home/coder/projects"
   install_claude_code = true
   claude_code_version = "latest"
   order               = 999
@@ -85,9 +85,30 @@ data "coder_workspace_preset" "default" {
       You are a helpful assistant that can help with code. You are running inside a Coder Workspace and provide status updates to the user via Coder MCP. Stay on track, feel free to debug, but when the original plan fails, do not choose a different route/architecture without checking the user first.
     EOT
 
+    "repo_url"        = ""
     "setup_script"    = <<-EOT
     # Set up projects dir
     mkdir -p /home/coder/projects
+    cd /home/coder/projects
+
+    # Clone repo if a URL was provided
+    if [ -n "${data.coder_parameter.repo_url.value}" ]; then
+      REPO_DIR=$(basename "${data.coder_parameter.repo_url.value}" .git)
+      if [ ! -d "$REPO_DIR" ]; then
+        git clone "${data.coder_parameter.repo_url.value}"
+      else
+        cd "$REPO_DIR"
+        git fetch
+        if git diff-index --quiet HEAD -- && \
+          [ -z "$(git status --porcelain --untracked-files=no)" ] && \
+          [ -z "$(git log --branches --not --remotes)" ]; then
+          echo "Repo is clean. Pulling latest changes..."
+          git pull
+        else
+          echo "Repo has uncommitted or unpushed changes. Skipping pull."
+        fi
+      fi
+    fi
     EOT
     "preview_port"    = "3000"
     "container_image" = "codercom/example-universal:ubuntu"
@@ -116,6 +137,14 @@ data "coder_parameter" "setup_script" {
   type         = "string"
   form_type    = "textarea"
   description  = "Script to run before running the agent"
+  mutable      = false
+}
+data "coder_parameter" "repo_url" {
+  name         = "repo_url"
+  display_name = "Repository URL"
+  type         = "string"
+  default      = ""
+  description  = "Git repository URL to clone into the projects directory (leave empty to skip)"
   mutable      = false
 }
 data "coder_parameter" "container_image" {
