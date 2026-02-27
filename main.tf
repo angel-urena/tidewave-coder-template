@@ -85,7 +85,6 @@ data "coder_workspace_preset" "default" {
       You are a helpful assistant that can help with code. You are running inside a Coder Workspace and provide status updates to the user via Coder MCP. Stay on track, feel free to debug, but when the original plan fails, do not choose a different route/architecture without checking the user first.
     EOT
 
-    "repo_url"        = ""
     "setup_script"    = <<-EOT
     # Set up projects dir
     mkdir -p /home/coder/projects
@@ -108,6 +107,19 @@ data "coder_workspace_preset" "default" {
           echo "Repo has uncommitted or unpushed changes. Skipping pull."
         fi
       fi
+      cd /home/coder/projects/$REPO_DIR
+    fi
+
+    # Install dependencies if an install command was provided
+    if [ -n "${data.coder_parameter.install_command.value}" ]; then
+      echo "Installing dependencies..."
+      ${data.coder_parameter.install_command.value}
+    fi
+
+    # Start the project dev server in the background if a start command was provided
+    if [ -n "${data.coder_parameter.start_command.value}" ]; then
+      echo "Starting project..."
+      nohup ${data.coder_parameter.start_command.value} > /tmp/project.log 2>&1 &
     fi
     EOT
     "preview_port"    = "3000"
@@ -145,6 +157,22 @@ data "coder_parameter" "repo_url" {
   type         = "string"
   default      = ""
   description  = "Git repository URL to clone into the projects directory (leave empty to skip)"
+  mutable      = false
+}
+data "coder_parameter" "install_command" {
+  name         = "install_command"
+  display_name = "Install Command"
+  type         = "string"
+  default      = ""
+  description  = "Command to install project dependencies (e.g., pnpm install, npm install, pip install -r requirements.txt)"
+  mutable      = false
+}
+data "coder_parameter" "start_command" {
+  name         = "start_command"
+  display_name = "Start Command"
+  type         = "string"
+  default      = ""
+  description  = "Command to start the project dev server in the background (e.g., pnpm dev, npm run dev)"
   mutable      = false
 }
 data "coder_parameter" "container_image" {
@@ -196,7 +224,7 @@ module "code-server" {
   count    = data.coder_workspace.me.start_count
   source   = "registry.coder.com/modules/code-server/coder"
   agent_id = coder_agent.dev.id
-  folder   = "/home/coder/projects"
+  folder   = data.coder_parameter.repo_url.value != "" ? "/home/coder/projects/${trimsuffix(basename(data.coder_parameter.repo_url.value), ".git")}" : "/home/coder/projects"
 }
 
 module "git-config" {
