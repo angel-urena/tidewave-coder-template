@@ -38,16 +38,24 @@ variable "socket" {
   default     = "unix:///var/run/docker.sock"
 }
 
-variable "anthropic_api_key" {
-  type        = string
-  description = "Generate one at: https://console.anthropic.com/settings/keys"
-  sensitive   = true
+data "coder_parameter" "claude_code_oauth_token" {
+  name         = "claude_code_oauth_token"
+  display_name = "Claude Code OAuth Token"
+  type         = "string"
+  description  = "Claude Code OAuth token for authentication"
+  mutable      = true
 }
 
-resource "coder_env" "anthropic_api_key" {
+resource "coder_env" "claude_code_oauth_token" {
   agent_id = coder_agent.dev.id
   name     = "CODER_MCP_CLAUDE_API_KEY"
-  value    = var.anthropic_api_key
+  value    = data.coder_parameter.claude_code_oauth_token.value
+}
+
+resource "coder_env" "claude_use_oauth" {
+  agent_id = coder_agent.dev.id
+  name     = "CLAUDE_CODE_USE_OAUTH"
+  value    = "1"
 }
 
 # The Claude Code module does the automatic task reporting
@@ -73,6 +81,7 @@ module "tidewave" {
   count    = data.coder_workspace.me.start_count
   source   = "git::https://github.com/angel-urena/tidewave-coder-module.git"
   agent_id = coder_agent.dev.id
+  port     = data.coder_parameter.tidewave_port.value
 }
 
 # We are using presets to set the prompts, image, and set up instructions
@@ -181,6 +190,14 @@ data "coder_parameter" "container_image" {
   type         = "string"
   default      = "codercom/example-universal:ubuntu"
   mutable      = false
+}
+data "coder_parameter" "tidewave_port" {
+  name         = "tidewave_port"
+  display_name = "Tidewave Port"
+  description  = "The port for Tidewave to listen on"
+  type         = "number"
+  default      = "9000"
+  mutable      = true
 }
 data "coder_parameter" "preview_port" {
   name         = "preview_port"
