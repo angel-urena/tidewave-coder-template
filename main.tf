@@ -48,8 +48,23 @@ data "coder_parameter" "claude_code_oauth_token" {
 
 resource "coder_env" "claude_code_oauth_token" {
   agent_id = coder_agent.dev.id
-  name     = "CODER_MCP_CLAUDE_API_KEY"
+  name     = "CLAUDE_CODE_OAUTH_TOKEN"
   value    = data.coder_parameter.claude_code_oauth_token.value
+}
+
+data "coder_parameter" "mise_github_token" {
+  name         = "mise_github_token"
+  display_name = "Mise GitHub Token"
+  type         = "string"
+  description  = "GitHub token for Mise to avoid rate limits"
+  mutable      = true
+  default      = ""
+}
+
+resource "coder_env" "mise_github_token" {
+  agent_id = coder_agent.dev.id
+  name     = "MISE_GITHUB_TOKEN"
+  value    = data.coder_parameter.mise_github_token.value
 }
 
 resource "coder_env" "claude_use_oauth" {
@@ -62,19 +77,17 @@ resource "coder_env" "claude_use_oauth" {
 # Other agent modules: https://registry.coder.com/modules?search=agent
 # Or use a custom agent:
 module "claude-code" {
-  count               = data.coder_workspace.me.start_count
-  source              = "registry.coder.com/coder/claude-code/coder"
-  version             = "2.0.0"
-  agent_id            = coder_agent.dev.id
-  folder              = data.coder_parameter.repo_url.value != "" ? "/home/coder/projects/${trimsuffix(basename(data.coder_parameter.repo_url.value), ".git")}" : "/home/coder/projects"
-  install_claude_code = true
-  claude_code_version = "latest"
-  order               = 999
-
-  experiment_post_install_script = data.coder_parameter.setup_script.value
-
-  # This enables Coder Tasks
-  experiment_report_tasks = true
+  count                   = data.coder_workspace.me.start_count
+  source                  = "registry.coder.com/coder/claude-code/coder"
+  version                 = "4.7.5"
+  agent_id                = coder_agent.dev.id
+  workdir                 = data.coder_parameter.repo_url.value != "" ? "/home/coder/projects/${trimsuffix(basename(data.coder_parameter.repo_url.value), ".git")}" : "/home/coder/projects"
+  install_claude_code     = true
+  claude_code_version     = "latest"
+  claude_code_oauth_token = data.coder_parameter.claude_code_oauth_token.value
+  model                   = "opus"
+  order                   = 999
+  post_install_script = data.coder_parameter.setup_script.value
 }
 
 module "tidewave" {
@@ -82,6 +95,10 @@ module "tidewave" {
   source   = "git::https://github.com/angel-urena/tidewave-coder-module.git"
   agent_id = coder_agent.dev.id
   port     = data.coder_parameter.tidewave_port.value
+
+  extra_allowed_origins = [
+    "http://${data.coder_workspace.me.name}.test:${data.coder_parameter.tidewave_port.value}",
+  ]
 }
 
 # We are using presets to set the prompts, image, and set up instructions
@@ -343,9 +360,19 @@ resource "coder_app" "preview" {
   }
 }
 
+resource "docker_image" "workspace" {
+  name = "coder-${data.coder_workspace_owner.me.name}-${lower(data.coder_workspace.me.name)}"
+  build {
+    context = path.module
+  }
+  triggers = {
+    dockerfile_hash = filesha256("${path.module}/Dockerfile")
+  }
+}
+
 resource "docker_container" "workspace" {
   count = data.coder_workspace.me.start_count
-  image = data.coder_parameter.container_image.value
+  image = docker_image.workspace.image_id
   # Uses lower() to avoid Docker restriction on container names.
   name     = "coder-${data.coder_workspace_owner.me.name}-${lower(data.coder_workspace.me.name)}"
   hostname = lower(data.coder_workspace.me.name)
@@ -373,6 +400,14 @@ resource "docker_container" "workspace" {
   host {
     host = "host.docker.internal"
     ip   = "host-gateway"
+  }
+  host {
+    host = "${data.coder_workspace.me.name}.test"
+    ip   = "127.0.0.1"
+  }
+  host {
+    host = "${data.coder_workspace.me.name}.test"
+    ip   = "::1"
   }
 }
 
